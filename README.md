@@ -45,7 +45,7 @@ The CLI tool has various flags as follows:
 - -d/--daemonize - Run as a daemon.
 - -o/--original - Sets MAC address to original and exit.
 
-On first run, it will create the /etc/macspoofer directory. Inside it will store the interfaces present on the system, along with their MAC address, whether the MAC address is the original or not, as well as the original MAC address. It is stored in JSON format.
+On first run, it will create the /etc/macspooferd directory. Inside it will store the interfaces present on the system, along with their MAC address, whether the MAC address is the original or not, as well as the original MAC address. It is stored in JSON format.
 
 It retrieves this information by parsing the files in the /sys/class/net/<iface> directory. More documentation on that directory and the files inside can be found here: 
 
