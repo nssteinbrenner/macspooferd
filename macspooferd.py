@@ -171,9 +171,9 @@ def getInterfaces():
 
         if isOriginal is True:
             originMac = mac
-        elif os.path.isfile("/etc/macspoofer/interfaces"):
+        elif os.path.isfile("/etc/macspooferd/interfaces"):
             try:
-                with open("/etc/macspoofer/interfaces", "r") as f:
+                with open("/etc/macspooferd/interfaces", "r") as f:
                     storedif = json.load(f)
                     originMac = storedif[interface]["original"]
             except KeyError as e:
@@ -187,16 +187,16 @@ def getInterfaces():
                                  "original": originMac,
                                  }
     try:
-        with open("/etc/macspoofer/interfaces", "r") as f:
+        with open("/etc/macspooferd/interfaces", "r") as f:
             storedif = json.load(f)
     except (FileNotFoundError, NotADirectoryError) as e:
-        print("/etc/macspoofer/interfaces not found. Creating file.")
-        if os.path.exists("/etc/macspoofer"):
-            os.remove("/etc/macspoofer")
-            os.mkdir("/etc/macspoofer")
-        elif not os.path.isdir("/etc/macspoofer"):
-            os.mkdir("/etc/macspoofer")
-        with open("/etc/macspoofer/interfaces", "w+") as f:
+        print("/etc/macspooferd/interfaces not found. Creating file.")
+        if os.path.exists("/etc/macspooferd"):
+            os.remove("/etc/macspooferd")
+            os.mkdir("/etc/macspooferd")
+        elif not os.path.isdir("/etc/macspooferd"):
+            os.mkdir("/etc/macspooferd")
+        with open("/etc/macspooferd/interfaces", "w+") as f:
             f.write(json.dumps(interfaces,
                                sort_keys=True,
                                indent=4,
@@ -207,7 +207,7 @@ def getInterfaces():
             storedif = json.load(f)
     finally:
         if storedif != json.dumps(interfaces):
-            with open("/etc/macspoofer/interfaces", "w") as f:
+            with open("/etc/macspooferd/interfaces", "w") as f:
                 f.write(json.dumps(interfaces,
                                    sort_keys=True,
                                    indent=4,
