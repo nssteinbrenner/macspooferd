@@ -12,9 +12,12 @@ The daemon will spoof your MAC address every time you connect/disconnect from a 
 
 ### Installing
 Make sure you have Python3.6+ installed:
+
     python --version
     Python 3.7.1
+    
 Test to see if iproute2 is installed:
+
     ip a s
     1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
@@ -24,6 +27,7 @@ Test to see if iproute2 is installed:
        valid_lft forever preferred_lft forever
     2: wlp4s0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN group default qlen 1000
     link/ether 74:70:fd:d8:20:14 brd ff:ff:ff:ff:ff:ff
+    
 Put macspooferd.py and oui.txt in the same directory of your choosing.
 
 ### Usage
