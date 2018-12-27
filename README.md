@@ -47,7 +47,7 @@ The CLI tool has various flags as follows:
 
 On first run, it will create the /etc/macspooferd directory. Inside it will store the interfaces present on the system, along with their MAC address, whether the MAC address is the original or not, as well as the original MAC address. It is stored in JSON format.
 
-It retrieves this information by parsing the files in the /sys/class/net/<iface> directory. More documentation on that directory and the files inside can be found here: 
+It retrieves this information by parsing the files in the /sys/class/net/{iface} directory. More documentation on that directory and the files inside can be found here: 
 
 https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-net
 
@@ -55,7 +55,7 @@ https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-net
 
 It isn't quite complete yet. I intended to have the cleanup, etc of the daemon handled by the init system (OpenRC or systemd in particular), but I haven't tested that very extensively yet. At the moment, the daemon aspect works outside of the init system, but you will have to kill it by getting the pid from ps.
 
-Additionally, I haven't found a way to grab the original MAC address if someone has spoofed their MAC address already. As is, if your MAC address has ever been changed, you will have to manually add the original to the /etc/macspooferd/interfaces directory under <iface>["original"]. If it was not able to grab your original MAC, it will be "null" in the JSON file. 
+Additionally, I haven't found a way to grab the original MAC address if someone has spoofed their MAC address already. As is, if your MAC address has ever been changed, you will have to manually add the original to the /etc/macspooferd/interfaces directory under {iface}["original"]. If it was not able to grab your original MAC, it will be "null" in the JSON file. 
 
 I have only tested the functionality on ArchLinux so far.
 
