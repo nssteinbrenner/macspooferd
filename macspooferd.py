@@ -11,6 +11,7 @@ import os
 import re
 import random
 import sys
+import logging
 
 
 parser = argparse.ArgumentParser(prog="Mac Spoofer",
@@ -29,6 +30,7 @@ parser.add_argument("-i",
 
 parser.add_argument("-v",
                     "--vendor",
+                    nargs="*",
                     default=None,
                     required=False,
                     help=("Specify vendor OUI for the mac. "
@@ -135,9 +137,9 @@ def getInterfaces():
 
         except OSError as e:
             mac = None
-            print(f"Error accessing /sys/class/net/{interface}/address. "
-                  f"File may not exist or be readable.\n{e}"
-                  )
+            logging.info(f"Error accessing /sys/class/net/{interface}/"
+                         f"address. File may not exist or be readable.\n{e}"
+                         )
         try:
 
             with open(f"/sys/class/net/{interface}/"
@@ -150,9 +152,10 @@ def getInterfaces():
 
         except OSError as e:
             isOriginal = None
-            print(f"Error accessing /sys/class/net/{interface}/"
-                  f"addr_assign_type. File may not exist or be readable.\n{e}"
-                  )
+            logging.info(f"Error accessing /sys/class/net/{interface}/"
+                         f"addr_assign_type. File may not exist "
+                         f"or be readable.\n{e}"
+                         )
         try:
 
             with open(f"/sys/class/net/{interface}/"
@@ -165,9 +168,9 @@ def getInterfaces():
 
         except OSError as e:
             up = None
-            print(f"Error accessing /sys/class/net/{interface}/carrier. "
-                  f"File may not exist or be readable.\n{e}"
-                  )
+            logging.info(f"Error accessing /sys/class/net/{interface}/"
+                         f"carrier. File may not exist or be readable.\n{e}"
+                         )
 
         if isOriginal is True:
             originMac = mac
@@ -181,6 +184,9 @@ def getInterfaces():
         else:
             originMac = None
 
+        if mac == originMac:
+            isOriginal = True
+
         interfaces[interface] = {"up": up,
                                  "mac": mac,
                                  "mac-is-original": isOriginal,
@@ -190,7 +196,7 @@ def getInterfaces():
         with open("/etc/macspooferd/interfaces", "r") as f:
             storedif = json.load(f)
     except (FileNotFoundError, NotADirectoryError) as e:
-        print("/etc/macspooferd/interfaces not found. Creating file.")
+        logging.info("/etc/macspooferd/interfaces not found. Creating file.")
         if os.path.exists("/etc/macspooferd"):
             os.remove("/etc/macspooferd")
             os.mkdir("/etc/macspooferd")
@@ -233,6 +239,8 @@ def getAllOui():
 
 
 def genMac(ouiList, vendor):
+    if isinstance(vendor, list):
+        vendor = vendor[random.randint(0, len(vendor)-1)]
     if vendor:
         targets = [oui for oui in ouiList
                    if f"{vendor.strip()} " in " ".join(oui)
@@ -292,7 +300,11 @@ def changeMac(interface, interfaces, newMac):
           f"{' '*len(interface)} - New MAC address: {newMac}"
           )
 
-    return newMac
+    logging.info(f"{interface} MAC changed {oldMac} --> {newMac}")
+
+    interfaces = getInterfaces()
+
+    return interfaces
 
 
 def checkValidMac(mac):
@@ -301,6 +313,7 @@ def checkValidMac(mac):
                 ):
         return True
     else:
+        logging.info(f"{mac} format cannot be parsed.")
         return False
 
 
@@ -320,7 +333,10 @@ def forceChange(interfaces):
              ]
 
     if len(procs) == 0:
-        raise Exception("Cannot find any running python instances.")
+        logging.warning("Could not find any running Python instances for "
+                        "-f/--force."
+                        )
+        raise Exception("Could not find any running Python instances.")
 
     foundProc = False
     currentInterfaces = []
@@ -344,19 +360,27 @@ def forceChange(interfaces):
                     for i in splitArgs[start:]:
                         if "-" in i:
                             break
+                        elif i == "" or i == " ":
+                            pass
                         else:
                             currentInterfaces.append(i)
 
     if foundProc is not True:
-        raise Exception("Cannot find daemon running in processes."
-                        " The -f/--force flag can only be run"
-                        " when there is an active daemon running."
-                        )
+        errorMsg = ("Could not find daemon running in processes. "
+                    "The -f/--force flag can only be run "
+                    "when there is an active daemon running."
+                    )
+        logging.warning(errorMsg)
+        raise Exception(errorMsg)
 
     if len(currentInterfaces):
         updateModTime(currentInterfaces)
+        for interface in currentInterfaces:
+            logging.debug(f"Updated MAC address for {interface}")
     else:
         updateModTime(interfaces)
+        for interface in interfaces:
+            logging.debug(f"Updated MAC address for {interface}")
 
 
 def watcher(interface,
@@ -374,35 +398,38 @@ def watcher(interface,
         while True:
             if checkModified(ifname, modTime):
                 if ifname not in interfaces.keys():
-                    raise ValueError(f"Interface {interface} could "
-                                     "not be found. Check 'ip a s' "
-                                     "or 'ip link' output for available "
-                                     "interfaces."
-                                     )
-                if ending:
-                    changeMac(ifname,
-                              interfaces,
-                              genEndingMac(ifname,
+                    errorMsg = (f"Interface {interface} could "
+                                "not be found. Check 'ip a s' "
+                                "or 'ip link' output for available "
+                                "interfaces."
+                                )
+                    logging.warning(errorMsg)
+                    raise Exception(errorMsg)
+
+                elif ending:
+                    interfaces = changeMac(ifname,
                                            interfaces,
+                                           genEndingMac(ifname,
+                                                        interfaces,
+                                                        )
                                            )
-                              )
-                if another:
-                    changeMac(ifname,
-                              interfaces,
-                              genMac(ouiList,
-                                     checkVendor(ifname,
-                                                 interfaces,
-                                                 ouiList,
-                                                 )
-                                     )
-                              )
-                if random or vendor:
-                    changeMac(ifname,
-                              interfaces,
-                              genMac(ouiList,
-                                     vendor,
-                                     )
-                              )
+                elif another:
+                    interfaces = changeMac(ifname,
+                                           interfaces,
+                                           genMac(ouiList,
+                                                  checkVendor(ifname,
+                                                              interfaces,
+                                                              ouiList,
+                                                              )
+                                                  )
+                                           )
+                else:
+                    interfaces = changeMac(ifname,
+                                           interfaces,
+                                           genMac(ouiList,
+                                                  vendor,
+                                                  )
+                                           )
                 modTime = time.time()
             time.sleep(0.2)
 
@@ -459,6 +486,14 @@ def createDaemon():
 
 
 def main():
+    #    loggingLevel = getattr(logging, loglevel.upper(), None)
+    #    if not isinstance(loggingLevel, int):
+    #        loggingLevel = 2
+    logging.basicConfig(filename="/var/log/macspooferd.log",
+                        format="%(asctime)s %(message)s",
+                        level=logging.INFO
+                        )
+
     interfaces = getInterfaces()
     ouiList = getAllOui()
 
@@ -558,10 +593,12 @@ def main():
     if args.interface and not args.daemonize:
         for interface in args.interface:
             if interface not in interfaces.keys():
-                raise ValueError(f"Interface {interface} could not be found."
-                                 "Check 'ip a s' or 'ip link' output for "
-                                 "available interfaces."
-                                 )
+                errorMsg = (f"Interface {interface} could not be found."
+                            "Check 'ip a s' or 'ip link' output for "
+                            "available interfaces."
+                            )
+                logging.warning(errorMsg)
+                raise Exception(errorMsg)
 
             if args.mac:
                 if checkValidMac(args.mac.strip()):
