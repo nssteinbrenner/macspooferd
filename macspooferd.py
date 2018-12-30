@@ -11,8 +11,6 @@ import os
 import re
 import random
 import sys
-import logging
-
 
 parser = argparse.ArgumentParser(prog="Mac Spoofer",
                                  description="Mac Spoofing Daemon",
@@ -94,8 +92,8 @@ parser.add_argument("-r",
                           ),
                     )
 
-parser.add_argument("-l",
-                    "--list",
+parser.add_argument("-p",
+                    "--print",
                     default=False,
                     action="store_true",
                     required=False,
@@ -122,6 +120,16 @@ parser.add_argument("-o",
                           ),
                     )
 
+parser.add_argument("-l",
+                    "--local",
+                    default=False,
+                    action="store_true",
+                    required=False,
+                    help=("Set the locally administered address bit. "
+                          "Can only be used with the -r/--random flag."
+                          ),
+                    )
+
 args = parser.parse_args()
 
 
@@ -137,9 +145,10 @@ def getInterfaces():
 
         except OSError as e:
             mac = None
-            logging.info(f"Error accessing /sys/class/net/{interface}/"
-                         f"address. File may not exist or be readable.\n{e}"
-                         )
+            sys.stderr.write(f"Error accessing /sys/class/net/{interface}/"
+                             f"address. File may not exist or be readable.\n"
+                             f"{e}\n"
+                             )
         try:
 
             with open(f"/sys/class/net/{interface}/"
@@ -152,10 +161,10 @@ def getInterfaces():
 
         except OSError as e:
             isOriginal = None
-            logging.info(f"Error accessing /sys/class/net/{interface}/"
-                         f"addr_assign_type. File may not exist "
-                         f"or be readable.\n{e}"
-                         )
+            sys.stderr.write(f"Error accessing /sys/class/net/{interface}/"
+                             f"addr_assign_type. File may not exist "
+                             f"or be readable.\n{e}\n"
+                             )
         try:
 
             with open(f"/sys/class/net/{interface}/"
@@ -168,9 +177,10 @@ def getInterfaces():
 
         except OSError as e:
             up = None
-            logging.info(f"Error accessing /sys/class/net/{interface}/"
-                         f"carrier. File may not exist or be readable.\n{e}"
-                         )
+            sys.stderr.write(f"Error accessing /sys/class/net/{interface}/"
+                             f"carrier. File may not exist or be readable.\n"
+                             f"{e}\n"
+                             )
 
         if isOriginal is True:
             originMac = mac
@@ -196,7 +206,9 @@ def getInterfaces():
         with open("/etc/macspooferd/interfaces", "r") as f:
             storedif = json.load(f)
     except (FileNotFoundError, NotADirectoryError) as e:
-        logging.info("/etc/macspooferd/interfaces not found. Creating file.")
+        sys.stderr.write("/etc/macspooferd/interfaces not found. "
+                         "Creating file.\n"
+                         )
         if os.path.exists("/etc/macspooferd"):
             os.remove("/etc/macspooferd")
             os.mkdir("/etc/macspooferd")
@@ -238,7 +250,35 @@ def getAllOui():
     return ouiList
 
 
-def genMac(ouiList, vendor):
+def genMac(ouiList, vendor, randomMac=False, local=False):
+    if randomMac is True:
+        bits = []
+        for i in range(6):
+            bits.append(str(random.randint(0, 1)))
+
+        if local is True:
+            bits.append("1")
+        else:
+            bits.append("0")
+
+        bits.append("0")
+        full = "".join(bits)
+        firstOctect = str(hex(int(full, 2)))[2:]
+
+        if len(firstOctect) == 1:
+            firstOctect = "0" + firstOctect
+
+        firstOctect += ":"
+
+        token_bytes = os.urandom(5)
+        mac = binascii.hexlify(token_bytes).decode("ascii")
+        mac = (firstOctect + ":".join([mac[i:i+2]
+                                       for i in range(0, len(mac), 2)
+                                       ]
+                                      )
+               )
+        return mac
+
     if isinstance(vendor, list):
         vendor = vendor[random.randint(0, len(vendor)-1)]
     if vendor:
@@ -283,8 +323,10 @@ def changeMac(interface, interfaces, newMac):
     try:
         if not checkValidMac(newMac):
             raise ValueError(f"MAC address {args.mac} is "
-                             "in an unaccepted format. Accepted "
-                             "formats are:\n\tXX:XX:XX:XX:XX:XX "
+                             "in an unaccepted format or is "
+                             "a multicast or broadcast address. "
+                             "Accepted formats are:"
+                             "\n\tXX:XX:XX:XX:XX:XX "
                              "\n\tXX-XX-XX-XX-XX-XX"
                              )
     except AttributeError as e:
@@ -292,15 +334,11 @@ def changeMac(interface, interfaces, newMac):
 
     oldMac = interfaces[interface]["mac"]
 
-    subprocess.call(["ip", "link", "set", "dev", interface, "down"])
+    subprocess.call(["ip", "link", "set", "down", "dev", interface])
     subprocess.call(["ip", "link", "set", "dev", interface, "address", newMac])
-    subprocess.call(["ip", "link", "set", "dev", interface, "up"])
+    subprocess.call(["ip", "link", "set", "up", "dev", interface])
 
-    print(f"{interface} - Old MAC Address: {oldMac}\n"
-          f"{' '*len(interface)} - New MAC address: {newMac}"
-          )
-
-    logging.info(f"{interface} MAC changed {oldMac} --> {newMac}")
+    sys.stdout.write(f"{interface} MAC changed {oldMac} --> {newMac}\n")
 
     interfaces = getInterfaces()
 
@@ -308,12 +346,22 @@ def changeMac(interface, interfaces, newMac):
 
 
 def checkValidMac(mac):
-    if re.match("[0-9a-f]{2}([-:]?)[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$",
-                mac.lower(),
-                ):
+    if int(mac[1], 16) % 2:
+        sys.stderr.write(f"MAC {mac} is a multicast address and "
+                         "cannot be used as a host MAC address."
+                         )
+        return False
+    elif mac.lower() == "ff:ff:ff:ff:ff:ff":
+        sys.stderr.write(f"MAC {mac} is a broadcast address and "
+                         "cannot be used as a host MAC address."
+                         )
+        return False
+    elif re.match("[0-9a-f]{2}([-:]?)[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$",
+                  mac.lower(),
+                  ):
         return True
     else:
-        logging.info(f"{mac} format cannot be parsed.")
+        sys.stderr.write(f"MAC {mac} format cannot be parsed.\n")
         return False
 
 
@@ -328,15 +376,14 @@ def forceChange(interfaces):
              for proc in (subprocess.Popen(["pgrep", "python"],
                                            stdout=subprocess.PIPE
                                            ).stdout.readlines()
-                          ) if proc != str(os.getpid())
-
+                          ) if proc.decode().strip() != str(os.getpid())
              ]
 
     if len(procs) == 0:
-        logging.warning("Could not find any running Python instances for "
-                        "-f/--force."
-                        )
-        raise Exception("Could not find any running Python instances.")
+        sys.stderr.write("Could not find any running Python instances for "
+                         "-f/--force.\n"
+                         )
+        sys.exit(1)
 
     foundProc = False
     currentInterfaces = []
@@ -368,28 +415,29 @@ def forceChange(interfaces):
     if foundProc is not True:
         errorMsg = ("Could not find daemon running in processes. "
                     "The -f/--force flag can only be run "
-                    "when there is an active daemon running."
+                    "when there is an active daemon running.\n"
                     )
-        logging.warning(errorMsg)
-        raise Exception(errorMsg)
+        sys.stderr.write(errorMsg)
+        sys.exit(1)
 
     if len(currentInterfaces):
         updateModTime(currentInterfaces)
         for interface in currentInterfaces:
-            logging.debug(f"Updated MAC address for {interface}")
+            sys.stdout.write(f"Forced MAC address change for {interface}\n")
     else:
         updateModTime(interfaces)
         for interface in interfaces:
-            logging.debug(f"Updated MAC address for {interface}")
+            sys.stdout.write(f"Forced MAC address change for {interface}\n")
 
 
 def watcher(interface,
             interfaces,
             ouiList,
+            vendor=False,
             ending=False,
             another=False,
             random=False,
-            vendor=False,
+            local=False
             ):
     modTime = 0
     if not interface:
@@ -401,10 +449,10 @@ def watcher(interface,
                     errorMsg = (f"Interface {interface} could "
                                 "not be found. Check 'ip a s' "
                                 "or 'ip link' output for available "
-                                "interfaces."
+                                "interfaces.\n"
                                 )
-                    logging.warning(errorMsg)
-                    raise Exception(errorMsg)
+                    sys.stderr.write(errorMsg)
+                    sys.exit(1)
 
                 elif ending:
                     interfaces = changeMac(ifname,
@@ -428,6 +476,8 @@ def watcher(interface,
                                            interfaces,
                                            genMac(ouiList,
                                                   vendor,
+                                                  randomMac=random,
+                                                  local=local
                                                   )
                                            )
                 modTime = time.time()
@@ -486,14 +536,6 @@ def createDaemon():
 
 
 def main():
-    #    loggingLevel = getattr(logging, loglevel.upper(), None)
-    #    if not isinstance(loggingLevel, int):
-    #        loggingLevel = 2
-    logging.basicConfig(filename="/var/log/macspooferd.log",
-                        format="%(asctime)s %(message)s",
-                        level=logging.INFO
-                        )
-
     interfaces = getInterfaces()
     ouiList = getAllOui()
 
@@ -504,81 +546,83 @@ def main():
                             args.original,
                             args.force,
                             args.show,
-                            args.list,
+                            args.print,
                             ]
                            ):
         parser.error("-r/--random can only be used with the following flags:"
-                     "\n\t-i/--interface\n\t-d/--daemonize"
+                     "\n\t-i/--interface\n\t-d/--daemonize\n\t-l/--local"
                      )
 
-    if args.mac and any([args.vendor,
-                         args.ending,
-                         args.another,
-                         args.random,
-                         args.original,
-                         args.force,
-                         args.show,
-                         args.list,
-                         args.daemonize
-                         ]
-                        ):
+    elif args.mac and any([args.vendor,
+                           args.ending,
+                           args.another,
+                           args.random,
+                           args.original,
+                           args.force,
+                           args.show,
+                           args.print,
+                           args.daemonize
+                           ]
+                          ):
         parser.error("-m/--mac can only be used with the following flags:"
                      "\n\t-i/--interface"
                      )
 
-    if args.ending and any([args.vendor,
-                            args.mac,
-                            args.another,
-                            args.random,
-                            args.original,
-                            args.force,
-                            args.show,
-                            args.list,
-                            ]
-                           ):
+    elif args.ending and any([args.vendor,
+                              args.mac,
+                              args.another,
+                              args.random,
+                              args.original,
+                              args.force,
+                              args.show,
+                              args.print,
+                              ]
+                             ):
         parser.error("-e/--ending can only be used with the following flags:"
                      "\n\t-i/--interface\n\t-d/--daemonize"
                      )
 
-    if args.another and any([args.vendor,
-                             args.mac,
-                             args.ending,
-                             args.random,
-                             args.original,
-                             args.force,
-                             args.show,
-                             args.list,
-                             ]
-                            ):
+    elif args.another and any([args.vendor,
+                               args.mac,
+                               args.ending,
+                               args.random,
+                               args.original,
+                               args.force,
+                               args.show,
+                               args.print,
+                               ]
+                              ):
         parser.error("-a/--another can only be used with the following flags:"
                      "\n\t-i/--interface\n\t-d/--daemonize"
                      )
 
-    if args.original and any([args.vendor,
-                              args.mac,
-                              args.ending,
-                              args.random,
-                              args.another,
-                              args.force,
-                              args.show,
-                              args.list,
-                              args.daemonize
-                              ]
-                             ):
+    elif args.original and any([args.vendor,
+                                args.mac,
+                                args.ending,
+                                args.random,
+                                args.another,
+                                args.force,
+                                args.show,
+                                args.print,
+                                args.daemonize
+                                ]
+                               ):
         parser.error("-o/--original can only be used with the following flags:"
                      "\n\t-i/--interface"
                      )
+    elif args.local and not args.random:
+        parser.error("-l/--local must be called with -r/--random.")
 
-    if args.force:
+    elif args.force:
         forceChange(list(interfaces.keys())[:])
         sys.exit(0)
 
-    if args.list:
+    elif args.print:
         for oui in ouiList:
             print(" ".join(oui).strip())
         sys.exit(0)
 
-    if args.daemonize:
+    elif args.daemonize:
         retCode = createDaemon()
         watcher(args.interface,
                 interfaces,
@@ -586,21 +630,22 @@ def main():
                 ending=args.ending,
                 another=args.another,
                 random=args.random,
+                local=args.local,
                 vendor=args.vendor,
                 )
         sys.exit(retCode)
 
-    if args.interface and not args.daemonize:
+    elif args.interface:
         for interface in args.interface:
             if interface not in interfaces.keys():
                 errorMsg = (f"Interface {interface} could not be found."
                             "Check 'ip a s' or 'ip link' output for "
-                            "available interfaces."
+                            "available interfaces.\n"
                             )
-                logging.warning(errorMsg)
-                raise Exception(errorMsg)
+                sys.stderr.write(errorMsg)
+                sys.exit(1)
 
-            if args.mac:
+            elif args.mac:
                 if checkValidMac(args.mac.strip()):
                     if '-' in args.mac.strip():
                         formattedMac = args.mac.strip().replace('-', ':')
@@ -615,11 +660,13 @@ def main():
                                   )
                 else:
                     raise ValueError(f"MAC address {args.mac} is "
-                                     "in an unaccepted format. Accepted "
-                                     "formats are:\n\tXX:XX:XX:XX:XX:XX "
+                                     "in an unaccepted format or is "
+                                     "a multicast or broadcast address. "
+                                     "Accepted formats are:"
+                                     "\n\tXX:XX:XX:XX:XX:XX "
                                      "\n\tXX-XX-XX-XX-XX-XX"
                                      )
-            if args.another:
+            elif args.another:
                 changeMac(interface,
                           interfaces,
                           genMac(ouiList,
@@ -629,14 +676,14 @@ def main():
                                              )
                                  )
                           )
-            if args.ending:
+            elif args.ending:
                 changeMac(interface,
                           interfaces,
                           genEndingMac(interface,
                                        interfaces,
                                        )
                           )
-            if args.show:
+            elif args.show:
                 print(f'"{interface}" ' +
                       json.dumps(interfaces[interface],
                                  sort_keys=True,
@@ -644,11 +691,21 @@ def main():
                                  separators=(",\n", ": "),
                                  ) + "\n"
                       )
-            if args.original:
+            elif args.original:
                 changeMac(interface,
                           interfaces,
                           interfaces[interface]["original"],
                           )
+            else:
+                changeMac(interface,
+                          interfaces,
+                          genMac(ouiList,
+                                 args.vendor,
+                                 randomMac=args.random,
+                                 local=args.local,
+                                 )
+                          )
+
         sys.exit(0)
 
     elif not args.interface and not args.daemonize:
@@ -666,7 +723,7 @@ def main():
                              "interfaces(s) Please specify "
                              "interfaces(s) with -i <ifname>"
                              )
-            if args.another:
+            elif args.another:
                 changeMac(interface,
                           interfaces,
                           genMac(ouiList,
@@ -676,17 +733,26 @@ def main():
                                              )
                                  )
                           )
-            if args.ending:
+            elif args.ending:
                 changeMac(interface,
                           interfaces,
                           genEndingMac(interface,
                                        interfaces,
                                        )
                           )
-            if args.original:
+            elif args.original:
                 changeMac(interface,
                           interfaces,
                           interfaces[interface]["original"],
+                          )
+            else:
+                changeMac(interface,
+                          interfaces,
+                          genMac(ouiList,
+                                 args.vendor,
+                                 randomMac=args.random,
+                                 local=args.local,
+                                 )
                           )
         sys.exit(0)
 
