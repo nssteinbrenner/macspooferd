@@ -41,9 +41,10 @@ The CLI tool has various flags as follows:
 - -e/--ending - Changes only the last three octects, keeping the current OUI.
 - -a/--another - Selects a random OUI from the same vendor as the current.
 - -r/--random - Sets a fully random MAC address.
-- -l/--list - Prints all known vendors. Recommend piping the output or grepping it, as the file is large.
+- -p/--print - Prints all known vendors. Recommend piping the output or grepping it, as the file is large.
 - -d/--daemonize - Run as a daemon.
 - -o/--original - Sets MAC address to original and exit.
+- -l/--local - Sets the Locally Administered Address bit in the MAC address. Must be used with -r/--random
 
 On first run, it will create the /etc/macspooferd directory. Inside it will store the interfaces present on the system, along with their MAC address, whether the MAC address is the original or not, as well as the original MAC address. It is stored in JSON format.
 
@@ -63,8 +64,8 @@ I have only tested the functionality on ArchLinux so far.
 
 - Test daemon compatability and cleanup with init systems.
 - Test the script on other GNU/Linux distributions.
-- Figure out how to find original MAC if it has been spoofed.
-- Implement logging system.
-- Improve error handling and coordinate it with the logging system.
+- Figure out how to find original MAC if it has been changed before.
+- Improve output to stdout/stderr, consider logging to syslog instead.
+- Improve error handling.
 - Reconsider configuration files format/directory/contents.
 - Accept looser MAC address formatting. e.g XX XX XX XX XX XX
